@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bracelet Design</title>
+    <link href="css/style.css" rel="stylesheet" type="text/css">
+
+    <style>
+        /* --- 样式优化：复刻原版风格 --- */
+        body { background-color: #f4f4f4; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+
+        /* 3D 视图容器 */
+        .card-view {
+            position: relative;
+            overflow: hidden;
+            background: #fff;
+            cursor: move;
+            height: 260px; /* 固定高度 */
+            border-bottom: 1px solid #eee;
+        }
+        .card-view canvas { width: 100% !important; height: 100% !important; display: block; outline: none; }
+
+        /* 卡片样式 */
+        .card-individual {
+            width: 31%; /* 一行三个 */
+            background: #fff;
+            border: 1px solid #ddd;
+            margin-bottom: 15px;
+            margin-right: 2%; /* 间距 */
+            float: left; /* 原版布局使用了浮动或Flex，这里兼容处理 */
+        }
+
+        .card-fitness { padding: 10px; text-align: center; }
+        .card-fitness input {
+            text-align: center; border: none; border-bottom: 1px solid #333;
+            font-size: 16px; width: 60px; outline: none;
+        }
+
+        /* 右侧面板 */
+        .cation-right {
+            background: #fff;
+            padding: 20px;
+            min-height: 600px;
+        }
+        .cation-right ul { list-style: none; padding: 0; margin: 0; }
+        .cation-right li {
+            height: 45px;
+            line-height: 45px;
+            border-bottom: 1px dashed #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            color: #333;
+            font-size: 14px;
+        }
+
+        /* 按钮组 */
+        .btn-group {
+            margin-top: 20px;
+            display: flex;
+            justify-content: flex-start;
+            gap: 15px;
+        }
+        .btn-next {
+            display: block;
+            width: 120px;
+            height: 40px;
+            line-height: 40px;
+            background: #5bc0de; /* 原版蓝色 */
+            border: none;
+            color: #fff;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+            cursor: pointer;
+            text-decoration: none;
+            border-radius: 2px;
+        }
+        .btn-next:hover { background: #46b8da; color: #fff; }
+
+        /* 代数显示 */
+        .times { margin-top: 30px; }
+        .times a {
+            display: inline-block;
+            color: #fff;
+            background: #ff8080; /* 原版红色 */
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            font-weight: bold;
+            font-size: 18px;
+            border-radius: 3px;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+<div class="cation-content">
+    <div style="height:50px"></div>
+    <div class="cation-flex">
+
+        <div class="cation-middle">
+            <div class="card-list">
+                <!-- 模板卡片：JS会复制这个结构 -->
+                <div class="card-individual">
+                    <div class="card-view"></div>
+                    <div class="card-fitness">
+                        <input type="number" class="fitness" max="10" min="0" value="5"/>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="cation-right">
+            <div id="app">
+                <ul>
+                    <!-- 使用 Vue 过滤器显示参数 -->
+                    <li><span>Selection Operator:</span> <span>{{ selectionOperator | selectionFilter }}</span></li>
+                    <li><span>Crossover Operator:</span> <span>{{ crossoverOperator | crossoverFilter}}</span></li>
+                    <li><span>Mutation Operator:</span> <span>{{ mutationOperator | mutationFilter}}</span></li>
+                    <li><span>Encoding:</span> <span>{{ code | codeFilter }}</span></li>
+                    <li><span>Population Size:</span> <span>{{ size }}</span></li>
+                    <li><span>Stop Generation:</span> <span>{{ generation }}</span></li>
+                    <li><span>Crossover Rate:</span> <span>{{ crossover }}</span></li>
+                    <li><span>Mutation Rate:</span> <span>{{ mutation }}</span></li>
+                </ul>
+            </div>
+
+            <div class="btn-group">
+                <a class="btn-next" href="/">Parameters</a>
+                <a class="btn-next" id="next">Evolution</a>
+            </div>
+
+            <div class="btn-group">
+                <a class="btn-next" id="save">Save</a>
+                <a class="btn-next" href="/chart" target="_blank">Chart</a>
+            </div>
+
+            <div class="times">
+                <a data-index="1">1</a>
+            </div>
+        </div>
+
+    </div>
+    <div style="height:50px"></div>
+</div>
+
+<script type="text/javascript" src="js/jquery.min.js"></script>
+<script type="text/javascript" src="js/vue.js"></script>
+<script type="text/javascript" src="js/jquery.cookie.js"></script>
+
+<script type="module">
+    import * as THREE from '/three/build/three.module.js';
+    import {OrbitControls} from '/three/jsm/controls/OrbitControls.js';
+
+    /*<![CDATA[*/
+
+    // 1. 初始化参数 (如果Cookie不存在则使用默认值)
+    var param = {
+        "selectionOperator": "1",
+        "crossoverOperator": "1",
+        "mutationOperator": "1",
+        "code": "2",
+        "size": "6",
+        "generation": "10",
+        "crossover": "0.9",
+        "mutation": "0.1"
+    }
+
+    if ($.cookie('igaConfig')) {
+        try {
+            let tempParam = $.cookie('igaConfig');
+            // 兼容处理：有些版本的jquery.cookie自动parse，有些不自动
+            if (typeof tempParam === 'string') {
+                param = JSON.parse(tempParam);
+            } else {
+                param = tempParam;
+            }
+        } catch (e) { console.log("Cookie error", e); }
+    }
+
+    var population = []; // 当前种群数据
+    var data = [];       // 历史数据记录
+    var generationNum = 1;
+
+    // 2. 初始化种群 (生成随机手镯基因)
+    function initPopulation() {
+        population = [];
+        let size = parseInt(param.size) || 6;
+        for (let i = 0; i < size; i++) {
+            let bracelet = {};
+            // 定义手镯的初始随机基因范围
+            bracelet.p1 = randomNum(5, 15);  // 半径
+            bracelet.p2 = randomNum(1, 5);   // 粗细
+            bracelet.p3 = randomNum(3, 16);  // 分段 (形状)
+            bracelet.p4 = randomNum(0, 10);  // 缩放/变形
+            bracelet.p5 = randomNum(0, 360); // 颜色
+            bracelet.p6 = 0; bracelet.p7 = 0; bracelet.p8 = 0; bracelet.p9 = 0;
+            bracelet.fitness = 5; // 默认分
+            population.push(bracelet);
+        }
+        data.push(population);
+    }
+
+    function randomNum(minNum, maxNum) {
+        return parseInt(Math.random() * (maxNum - minNum + 1) + minNum, 10);
+    }
+
+    // 3. 初始化DOM卡片 (jQuery逻辑)
+    function initCard() {
+        let size = parseInt(param.size) || 6;
+        // 获取模板HTML
+        let template = $(".card-list .card-individual").first().prop('outerHTML');
+        $(".card-list").html(""); // 清空
+        // 根据种群数量生成卡片
+        for (let i = 0; i < size; i++) {
+            $(".card-list").append(template);
+        }
+    }
+
+    // 执行初始化
+    initPopulation();
+    var finalPopulation = population; // 用于提交进化的数据
+    initCard();
+    datashow(); // 首次渲染
+
+    // 4. 进化按钮逻辑
+    $("#next").click(function () {
+        nextGeneration();
+    })
+
+    function nextGeneration() {
+        if (generationNum >= parseInt(param.generation)) {
+            alert("已达到终止代数 (Stop Generation Reached)");
+            return;
+        }
+
+        // 收集用户打分
+        let fitnessEL = $(".fitness");
+        for (let i = 0; i < fitnessEL.length; i++) {
+            // 安全更新，防止数组越界
+            if(finalPopulation[i]) {
+                finalPopulation[i].fitness = $(fitnessEL[i]).val();
+            }
+        }
+
+        // 发送 AJAX 请求到 BraceletController
+        $.ajax({
+            url: "/bracelet/evolution",
+            type: "post",
+            data: {
+                populationStr: JSON.stringify(finalPopulation),
+                configStr: JSON.stringify(param)
+            },
+            dataType: "json",
+            success: function (newPopulation) {
+                // 更新数据
+                population = newPopulation;
+                data.push(population);
+                finalPopulation = population;
+
+                // 清空旧 Canvas
+                $(".card-view").empty();
+
+                // 重新渲染
+                datashow();
+
+                // 更新代数显示
+                generationNum++;
+                // 移除旧的激活样式（可选），这里简单直接替换文字
+                $(".times").html('<a data-index="' + generationNum + '">' + generationNum + '</a>');
+            },
+            error: function(e) {
+                alert("Evolution failed. Please check backend.");
+            }
+        });
+    }
+
+    // 5. 保存按钮逻辑
+    var saveFlag = true;
+    $("#save").click(function () {
+        if (!saveFlag) { alert('Already saved'); return; }
+
+        // 收集当前分数
+        let fitnessEL = $(".fitness");
+        for (let i = 0; i < fitnessEL.length; i++) {
+            if(finalPopulation[i]) finalPopulation[i].fitness = $(fitnessEL[i]).val();
+        }
+
+        $.ajax({
+            url: "/save",
+            type: "post",
+            data: {
+                data: JSON.stringify(data), // 保存所有代的数据
+                configStr: JSON.stringify(param)
+            },
+            dataType: "json",
+            success: function (res) {
+                alert("Saved Successfully!");
+                saveFlag = false;
+            }
+        });
+    })
+
+    // 6. 核心渲染逻辑 (Three.js)
+    function datashow() {
+        let cardViews = $(".card-view");
+
+        for (let i = 0; i < cardViews.length; i++) {
+            // 如果种群数据不够，跳过
+            if (!population[i]) break;
+
+            let container = cardViews[i];
+            let w = $(container).width();
+            let h = $(container).height();
+
+            // 场景
+            let scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff); // 纯白背景
+
+            // 相机
+            let camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
+            camera.position.set(0, 15, 25); // 调整视角
+            camera.lookAt(0, 0, 0);
+
+            // 渲染器
+            let renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(w, h);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // 灯光
+            let mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            mainLight.position.set(10, 20, 10);
+            scene.add(mainLight);
+            scene.add(new THREE.AmbientLight(0x606060));
+
+            // --- 构造手镯几何体 ---
+            let p = population[i];
+            // 映射参数
+            let radius = 3.5 + (p.p1 * 0.25);
+            let tube = 0.6 + (p.p2 * 0.15);
+            let radialSegments = Math.max(3, p.p3);
+            let tubularSegments = 100;
+
+            let geometry = new THREE.TorusGeometry(radius, tube, radialSegments, tubularSegments);
+
+            // p4 变形 (椭圆)
+            if (p.p4 > 5) {
+                geometry.scale(1.4, 1, 1);
+            }
+
+            // 材质颜色
+            let hue = (p.p5 * 10) % 360;
+            let material = new THREE.MeshPhysicalMaterial({
+                color: `hsl(${hue}, 60%, 50%)`,
+                metalness: 0.1,
+                roughness: 0.2,
+                clearcoat: 1.0,
+                side: THREE.DoubleSide
+            });
+
+            let mesh = new THREE.Mesh(geometry, material);
+            // 初始角度
+            mesh.rotation.x = Math.PI / 2 - Math.PI / 6;
+            scene.add(mesh);
+
+            // 控制器 (OrbitControls)
+            let controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // 动画循环
+            let animate = function () {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            };
+            animate();
+        }
+    }
+
+    // 7. Vue 过滤器 (右侧面板显示)
+    Vue.filter('selectionFilter', function (value) {
+        let map = {
+            '1': 'Roulette Wheel Selection', '2': 'Stochastic universal selection',
+            '3': 'Linear Ranking Selection', '4': 'Tournament Selection'
+        }
+        return map[value] || value
+    })
+
+    Vue.filter('crossoverFilter', function (value) {
+        let map = {'1': 'One-point Crossover', '2': 'Two-point Crossover', '3': 'Uniform Crossover', '4': 'Cycle Crossover'}
+        return map[value] || value
+    })
+
+    Vue.filter('mutationFilter', function (value) {
+        let map = {'1': 'Simple Mutation', '2': 'Uniform Mutation'}
+        return map[value] || value
+    })
+
+    Vue.filter('codeFilter', function (value) {
+        let map = {'10': 'Decimal', '2': 'Binary'}
+        return map[value] || value
+    })
+
+    // 初始化右侧 Vue 面板
+    var app = new Vue({
+        el: '#app',
+        data: param
+    })
+
+    /*]]>*/
+</script>
+</body>
+</html>
